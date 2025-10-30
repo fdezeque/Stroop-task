@@ -1,0 +1,319 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Tâche de Stroop (FR) — PyScript</title>
+  <!-- PyScript (loads Python in the browser) -->
+  <link rel="stylesheet" href="https://pyscript.net/latest/pyscript.css" />
+  <script defer src="https://pyscript.net/latest/pyscript.js"></script>
+  <style>
+    :root { --fg: #0f172a; --muted:#64748b; --card:#ffffff; --accent:#0ea5e9; }
+    body { font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, Noto Sans, Apple Color Emoji, Segoe UI Emoji;
+           background:#f8fafc; color:var(--fg); margin:0; padding:2rem; }
+    .wrap { max-width: 920px; margin: 0 auto; }
+    .card { background:var(--card); border-radius: 18px; padding: 24px; box-shadow: 0 10px 30px rgba(2,8,23,0.06); }
+    h1 { margin:0 0 8px; font-weight: 800; letter-spacing: -0.02em; }
+    .muted { color: var(--muted); }
+    .row { display:flex; gap: 12px; flex-wrap: wrap; align-items: center; }
+    .btn { padding: 12px 16px; border-radius: 12px; border: 1px solid #e2e8f0; background:#fff; cursor:pointer; font-weight:600; }
+    .btn.primary { background: var(--accent); color:white; border-color:transparent; }
+    .btn:disabled { opacity: .5; cursor:not-allowed;}
+    .center { text-align:center; }
+    .word { font-size: 72px; font-weight: 900; letter-spacing: 0.02em; margin: 36px 0 12px; }
+    .kbd { display:inline-block; padding:4px 8px; border:1px solid #e2e8f0; border-bottom-width:2px; border-radius:8px; background:#fff; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
+    .legend { display:grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 8px; margin-top: 10px; }
+    .stat { display:grid; grid-template-columns: 1fr auto; gap: 4px; }
+    .small { font-size: 12px; }
+    .footer { margin-top: 24px; font-size: 12px; color: var(--muted); }
+    .spacer { height: 6px; }
+    .hidden { display:none; }
+  </style>
+</head>
+<body>
+<div class="wrap">
+  <div class="card">
+    <h1>Tâche de Stroop (FR)</h1>
+    <p class="muted">
+      Objectif : nommez la <strong>couleur de l'encre</strong> aussi vite et justement que possible, en ignorant le mot affiché.
+    </p>
+    <div class="legend muted small">
+      <div><span class="kbd">R</span> = Rouge</div>
+      <div><span class="kbd">V</span> = Vert</div>
+      <div><span class="kbd">B</span> = Bleu</div>
+      <div><span class="kbd">J</span> = Jaune</div>
+      <div><span class="kbd">N</span> = Noir</div>
+      <div><span class="kbd">P</span> = Violet (Purple)</div>
+    </div>
+
+    <div class="spacer"></div>
+
+    <div id="screen-intro">
+      <p>
+        Appuyez sur le bouton <em>Démarrer</em> puis répondez au clavier avec les touches ci‑dessus.
+        Une croix de fixation précède chaque essai. À la fin, vous verrez vos temps moyens pour les essais
+        <strong>congruents</strong> (mot et encre identiques) vs <strong>incongruents</strong> (différents).
+      </p>
+      <div class="row">
+        <label for="ntrials">Nombre d'essais :</label>
+        <input id="ntrials" type="number" value="40" min="10" max="300" step="5" />
+        <label for="soafix">Durée fixation (ms) :</label>
+        <input id="soafix" type="number" value="500" min="100" max="2000" step="50" />
+        <label for="timeout">Temps max par essai (ms) :</label>
+        <input id="timeout" type="number" value="3000" min="500" max="10000" step="100" />
+      </div>
+      <div class="row" style="margin-top:10px">
+        <button id="btn-start" class="btn primary">Démarrer</button>
+        <button id="btn-demo" class="btn">Démo rapide (8 essais)</button>
+        <button id="btn-export" class="btn" disabled>Télécharger les données (.csv)</button>
+      </div>
+    </div>
+
+    <div id="screen-fix" class="center hidden">
+      <div class="word">+</div>
+    </div>
+
+    <div id="screen-stim" class="center hidden">
+      <div id="stim-word" class="word">BLEU</div>
+      <div id="stim-help" class="muted small">Répondez maintenant avec R, V, B, J, N, P…</div>
+    </div>
+
+    <div id="screen-end" class="hidden">
+      <h3>Résultats</h3>
+      <div id="summary"></div>
+      <div class="row" style="margin-top:10px">
+        <button id="btn-restart" class="btn">Refaire</button>
+        <button id="btn-export-2" class="btn">Télécharger les données (.csv)</button>
+      </div>
+      <div class="footer">
+        Conseil : vous pouvez héberger ce fichier tel quel (GitHub Pages, Netlify Drop, etc.) pour partager un lien public.
+      </div>
+    </div>
+  </div>
+</div>
+
+<py-script>
+from js import document, window, Date, Blob, URL
+from pyodide.ffi import create_proxy
+import math, random
+
+# --------- Paramètres & structures ---------
+COLORS = [
+  {"name":"ROUGE", "key":"R", "css":"#ef4444"},
+  {"name":"VERT",  "key":"V", "css":"#22c55e"},
+  {"name":"BLEU",  "key":"B", "css":"#3b82f6"},
+  {"name":"JAUNE", "key":"J", "css":"#eab308"},
+  {"name":"NOIR",  "key":"N", "css":"#111827"},
+  {"name":"VIOLET","key":"P", "css":"#8b5cf6"},  # P pour Purple/Violet
+]
+
+KEYMAP = { c["key"]: c["name"] for c in COLORS }  # R->ROUGE etc.
+KEYS   = set(KEYMAP.keys())
+
+state = {
+  "phase": "intro",          # intro|fix|stim|end
+  "trial_index": -1,
+  "trials": [],              # liste de dicts avec (word_text, ink_name, congruent, rt, correct, key)
+  "start_time": 0.0,
+  "timeout_ms": 3000,
+  "fix_ms": 500,
+  "ntrials": 40,
+  "awaiting_resp": False,
+}
+
+# --------- UI helpers ---------
+def show(id_):
+    for i in ["screen-intro","screen-fix","screen-stim","screen-end"]:
+        document.getElementById(i).classList.add("hidden")
+    document.getElementById(id_).classList.remove("hidden")
+
+def set_word(text, color_css):
+    el = document.getElementById("stim-word")
+    el.innerText = text
+    el.style.color = color_css
+
+def now_ms():
+    # Haute résolution via JS
+    return window.performance.now()
+
+def build_trials(n):
+    trials = []
+    # 50% congruents, 50% incongruents (approximativement)
+    for i in range(n):
+        w = random.choice(COLORS)            # mot
+        if i % 2 == 0:
+            # congruent
+            ink = w
+            congruent = True
+        else:
+            # incongruent: choisir une autre couleur
+            pool = [c for c in COLORS if c["name"] != w["name"]]
+            ink = random.choice(pool)
+            congruent = False
+        trials.append({
+            "word_text": w["name"],
+            "ink_name": ink["name"],
+            "ink_css": ink["css"],
+            "congruent": congruent,
+            "rt": None,
+            "correct": None,
+            "key": None
+        })
+    random.shuffle(trials)
+    return trials
+
+# --------- Logique d'expérience ---------
+def start_experiment(ntrials=None, fix_ms=None, timeout_ms=None):
+    if ntrials is not None: state["ntrials"] = int(ntrials)
+    if fix_ms is not None: state["fix_ms"] = int(fix_ms)
+    if timeout_ms is not None: state["timeout_ms"] = int(timeout_ms)
+
+    state["trials"] = build_trials(state["ntrials"])
+    state["trial_index"] = -1
+    state["phase"] = "fix"
+    show("screen-fix")
+    window.setTimeout(create_proxy(next_trial), state["fix_ms"])
+
+def next_trial(_evt=None):
+    state["trial_index"] += 1
+    if state["trial_index"] >= len(state["trials"]):
+        return end_experiment()
+
+    t = state["trials"][state["trial_index"]]
+    set_word(t["word_text"], t["ink_css"])
+    state["phase"] = "stim"
+    state["awaiting_resp"] = True
+    show("screen-stim")
+    state["start_time"] = now_ms()
+
+    # Démarrer un timeout d'essai
+    window.setTimeout(create_proxy(on_trial_timeout), state["timeout_ms"])
+
+def on_trial_timeout():
+    # Si aucune réponse n'a été donnée
+    if state["phase"] == "stim" and state["awaiting_resp"]:
+        record_response(None)  # pas de touche
+        # petite pause fixation
+        state["phase"] = "fix"
+        show("screen-fix")
+        window.setTimeout(create_proxy(next_trial), state["fix_ms"])
+
+def record_response(key):
+    if not state["awaiting_resp"]:
+        return
+    state["awaiting_resp"] = False
+
+    t = state["trials"][state["trial_index"]]
+    rt = now_ms() - state["start_time"]
+    t["rt"] = rt
+    t["key"] = key
+
+    if key is None:
+        t["correct"] = False
+    else:
+        # la bonne réponse est la COULEUR DE L'ENCRE (ink_name)
+        expected = t["ink_name"]
+        given = KEYMAP.get(key, None)
+        t["correct"] = (given == expected)
+
+def on_keydown(evt):
+    if state["phase"] != "stim":
+        return
+    key = evt.key.upper()
+    if key in KEYS:
+        record_response(key)
+        # passer à la fixation suivante
+        state["phase"] = "fix"
+        show("screen-fix")
+        window.setTimeout(create_proxy(next_trial), state["fix_ms"])
+
+key_proxy = create_proxy(on_keydown)
+document.addEventListener("keydown", key_proxy)
+
+# --------- Résumé & export ---------
+def mean(xs):
+    xs = [x for x in xs if x is not None]
+    return sum(xs)/len(xs) if xs else float("nan")
+
+def summarize(trials):
+    congruent_rts = [t["rt"] for t in trials if t["congruent"] and t["correct"]]
+    incongruent_rts = [t["rt"] for t in trials if (not t["congruent"]) and t["correct"]]
+    acc = [1 if t["correct"] else 0 for t in trials if t["rt"] is not None]
+
+    m_cong = mean(congruent_rts)
+    m_inco = mean(incongruent_rts)
+    diff = m_inco - m_cong if (m_cong==m_cong and m_inco==m_inco) else float("nan")
+    acc_mean = mean(acc) if acc else float("nan")
+
+    return {
+        "n": len(trials),
+        "rt_congruent_ms": round(m_cong, 1) if (m_cong==m_cong) else None,
+        "rt_incongruent_ms": round(m_inco, 1) if (m_inco==m_inco) else None,
+        "incongruent_minus_congruent_ms": round(diff, 1) if (diff==diff) else None,
+        "accuracy_pct": round(acc_mean*100, 1) if (acc_mean==acc_mean) else None
+    }
+
+def render_summary():
+    s = summarize(state["trials"])
+    html = f"""
+      <div class='stat'><span>Essais totaux</span><strong>{s['n']}</strong></div>
+      <div class='stat'><span>RT moyen congruent (ms)</span><strong>{s['rt_congruent_ms'] if s['rt_congruent_ms'] is not None else '—'}</strong></div>
+      <div class='stat'><span>RT moyen incongruent (ms)</span><strong>{s['rt_incongruent_ms'] if s['rt_incongruent_ms'] is not None else '—'}</strong></div>
+      <div class='stat'><span>Différence (inco − cong) (ms)</span><strong>{s['incongruent_minus_congruent_ms'] if s['incongruent_minus_congruent_ms'] is not None else '—'}</strong></div>
+      <div class='stat'><span>Précision (%)</span><strong>{s['accuracy_pct'] if s['accuracy_pct'] is not None else '—'}</strong></div>
+      <p class='muted small'>RT = temps de réaction sur essais corrects uniquement.</p>
+    """
+    document.getElementById("summary").innerHTML = html
+
+def export_csv():
+    # Construire CSV
+    header = ["trial","word_text","ink_name","congruent","rt_ms","correct","key"]
+    lines = [",".join(header)]
+    for i, t in enumerate(state["trials"]):
+        row = [
+            str(i+1),
+            t["word_text"],
+            t["ink_name"],
+            "1" if t["congruent"] else "0",
+            "" if t["rt"] is None else f"{t['rt']:.1f}",
+            "" if t["correct"] is None else ("1" if t["correct"] else "0"),
+            "" if t["key"] is None else t["key"],
+        ]
+        lines.append(",".join(row))
+    csv_text = "\n".join(lines)
+    blob = Blob.new([csv_text], { "type": "text/csv;charset=utf-8" })
+    url = URL.createObjectURL(blob)
+    a = document.createElement("a")
+    a.href = url
+    a.download = f"stroop_resultats_{int(Date.now()/1000)}.csv"
+    a.click()
+    URL.revokeObjectURL(url)
+
+def end_experiment():
+    state["phase"] = "end"
+    render_summary()
+    show("screen-end")
+    # activer export
+    document.getElementById("btn-export").disabled = False
+
+# --------- Événements boutons ---------
+def on_start(_evt=None):
+    n = document.getElementById("ntrials").value
+    fix = document.getElementById("soafix").value
+    to = document.getElementById("timeout").value
+    start_experiment(n, fix, to)
+
+def on_demo(_evt=None):
+    start_experiment(8, 400, 2000)
+
+def on_export(_evt=None):
+    export_csv()
+
+document.getElementById("btn-start").addEventListener("click", create_proxy(on_start))
+document.getElementById("btn-demo").addEventListener("click", create_proxy(on_demo))
+document.getElementById("btn-export").addEventListener("click", create_proxy(on_export))
+document.getElementById("btn-export-2").addEventListener("click", create_proxy(on_export))
+document.getElementById("btn-restart").addEventListener("click", create_proxy(lambda _e: show("screen-intro")))
+</py-script>
+</body>
+</html>
