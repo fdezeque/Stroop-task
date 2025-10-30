@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Tâche de Stroop (FR) — Brython fond noir</title>
+  <script src="https://cdn.jsdelivr.net/npm/brython@3.12.3/brython.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/brython@3.12.3/brython_stdlib.js"></script>
+  <style>
+    body{font-family:sans-serif;background:#000;color:#fff;padding:30px;text-align:center}
+    h1{color:#fff}
+    .btn{padding:10px 20px;margin:10px;border:none;border-radius:5px;cursor:pointer}
+    .start{background:#2563eb;color:#fff}
+    .word{font-size:80px;font-weight:bold;margin:40px}
+    .hidden{display:none}
+    #summary{margin-top:30px;color:#fff}
+  </style>
+</head>
+<body onload="brython()">
+  <h1>Tâche de Stroop (FR)</h1>
+  <div id="intro">
+    <p>Appuyez sur le bouton ci-dessous pour démarrer l’expérience.<br>
+    Répondez avec les touches R, V, B, J, N, P pour nommer la <b>couleur de l’encre</b>.</p>
+    <button id="start" class="btn start">Démarrer</button>
+  </div>
+  <div id="fix" class="hidden"><div class="word" style="color:white">+</div></div>
+  <div id="stim" class="hidden"><div id="stimword" class="word"></div></div>
+  <div id="summary" class="hidden"></div>
+
+<script type="text/python">
+from browser import document, timer, window
+import random, time, math
+
+COLORS = [
+  {"name":"ROUGE","key":"R","css":"#ef4444"},
+  {"name":"VERT","key":"V","css":"#22c55e"},
+  {"name":"BLEU","key":"B","css":"#3b82f6"},
+  {"name":"JAUNE","key":"J","css":"#eab308"},
+  {"name":"NOIR","key":"N","css":"#e5e5e5"},
+  {"name":"VIOLET","key":"P","css":"#8b5cf6"},
+]
+
+KEYMAP = {c["key"]:c["name"] for c in COLORS}
+KEYS = set(KEYMAP.keys())
+
+state = {"trials":[], "idx":-1, "start":0, "awaiting":False, "results":[]}
+
+def show(screen):
+    for s in ["intro","fix","stim","summary"]:
+        document[s].classList.add("hidden")
+    document[screen].classList.remove("hidden")
+
+def build_trials(n=20):
+    trials=[]
+    for i in range(n):
+        w=random.choice(COLORS)
+        ink=random.choice(COLORS)
+        trials.append({"word":w["name"],"ink":ink["name"],"ink_css":ink["css"],"congruent":w["name"]==ink["name"],"rt":None,"correct":None})
+    random.shuffle(trials)
+    return trials
+
+def next_trial():
+    state["idx"]+=1
+    if state["idx"]>=len(state["trials"]):
+        return end()
+    t=state["trials"][state["idx"]]
+    document["stimword"].text=t["word"]
+    document["stimword"].style.color=t["ink_css"]
+    show("stim")
+    state["awaiting"]=True
+    state["start"]=window.performance.now()
+    timer.set_timeout(timeout_trial,3000)
+
+def timeout_trial():
+    if state["awaiting"]:
+        record(None)
+
+def record(key):
+    if not state["awaiting"]:
+        return
+    t=state["trials"][state["idx"]]
+    t["rt"]=window.performance.now()-state["start"]
+    if key is None:
+        t["correct"]=False
+    else:
+        t["correct"]=KEYMAP.get(key)==t["ink"]
+    state["awaiting"]=False
+    show("fix")
+    timer.set_timeout(next_trial,400)
+
+def on_key(ev):
+    k=ev.key.upper()
+    if state["awaiting"] and k in KEYS:
+        record(k)
+document.bind("keydown",on_key)
+
+def start(ev):
+    state["trials"]=build_trials(20)
+    state["idx"]=-1
+    show("fix")
+    timer.set_timeout(next_trial,500)
+
+def end():
+    show("summary")
+    congr=[t["rt"] for t in state["trials"] if t["congruent"] and t["correct"]]
+    incon=[t["rt"] for t in state["trials"] if not t["congruent"] and t["correct"]]
+    acc=[1 if t["correct"] else 0 for t in state["trials"]]
+    mean=lambda x: sum(x)/len(x) if x else float("nan")
+    diff=mean(incon)-mean(congr) if incon and congr else float("nan")
+    document["summary"].innerHTML=f"<h3>Résultats</h3><p>Essais: {len(state['trials'])}<br>RT congruent: {mean(congr):.1f} ms<br>RT incongruent: {mean(incon):.1f} ms<br>Différence: {diff:.1f} ms<br>Précision: {mean(acc)*100:.1f}%</p><button onclick='window.location.reload()' class='btn'>Refaire</button>"
+
+document["start"].bind("click",start)
+</script>
+</body>
+</html>
